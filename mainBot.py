@@ -1,5 +1,6 @@
 import asyncio
-from config import API_TOKEN as API_TOKEN
+import requests
+from config import API_TOKEN, API_OWM_TOKEN
 import psycopg2
 import random
 
@@ -19,7 +20,6 @@ from aiogram.contrib.middlewares.logging import LoggingMiddleware
 
 from db_model import Base, MediaIds
 
-
 HELP_TEXT = '''
 /give - рандомная пичка из базы данных
 /start - иди нахуй
@@ -35,6 +35,7 @@ START_TEXT = '''
 count = 0
 
 bot = Bot(token=API_TOKEN)
+
 dp = Dispatcher(bot)
 logging.basicConfig(level=logging.INFO)
 dp.middleware.setup(LoggingMiddleware())
@@ -82,6 +83,30 @@ def get_random_record_from_postgres():
 
     connection.close()
     return random_record
+
+
+@dp.message_handler(commands=['weather'])
+async def weather_state(message: types.Message):
+    await message.reply('Введите название городе, погоду которого хотите посмотреть')
+    await States.START.set()
+
+
+@dp.message_handler()
+async def weather_print(message: types.Message):
+    city_name = message.text
+
+    # Отправляем запрос к OpenWeatherMap API
+    try:
+        response = requests.get(f"http://api.openweathermap.org/data/2.5/weather?q={city_name}&appid={API_OWM_TOKEN}")
+        weather_data = response.json()
+        if response.status_code == 200:
+            weather_description = weather_data["weather"][0]["description"]
+            temperature = weather_data["main"]["temp"] - 273.15  # Конвертируем из Кельвинов в градусы Цельсия
+            await message.reply(f"Погода в городе {city_name}: {weather_description}, температура: {temperature:.2f}°C")
+        else:
+            await message.reply("Не удалось получить данные о погоде.")
+    except Exception as e:
+        await message.reply("Произошла ошибка при запросе погодных данных.")
 
 
 @dp.message_handler(commands=['give'])
