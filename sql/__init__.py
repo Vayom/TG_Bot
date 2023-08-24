@@ -1,0 +1,1 @@
+from .sql import get_random_record_from_postgres

@@ -1,12 +1,15 @@
 import asyncio
 import requests
 
+from states import *
+from keyboards import *
 from config import API_TOKEN, API_OWM_TOKEN
+from sql import *
+
 import psycopg2
 import random
 
 from aiogram.dispatcher.filters import Text
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from sqlalchemy import create_engine, Column, Integer, String, DateTime
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
@@ -46,54 +49,6 @@ DATABASE_URL = 'postgresql://postgres:123@localhost:5432/TG_DB'
 engine = create_engine(DATABASE_URL)
 Session = sessionmaker(bind=engine)
 Base.metadata.create_all(engine)
-
-
-class States(StatesGroup):
-    Weather = State()
-    START = State()
-    GIVING_ITEM = State()
-    LOAD_ITEM = State()
-
-
-def start_keyboard():
-    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-    button1 = KeyboardButton("/give")
-    button2 = KeyboardButton("/weather")
-    button3 = KeyboardButton("/help")
-    keyboard.add(button1, button2, button3)
-    return keyboard
-
-
-def weather_keyboard():
-    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-    button1 = KeyboardButton("/back")
-    keyboard.add(button1)
-    return keyboard
-
-
-def give_keyboard():
-    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-    button1 = KeyboardButton("/give")
-    button2 = KeyboardButton("/back")
-    keyboard.add(button1, button2)
-    return keyboard
-
-
-def get_random_record_from_postgres():
-    connection = psycopg2.connect(
-        database="TG_DB",
-        user="postgres",
-        password="123",
-        host="localhost",
-        port="5432"
-    )
-
-    cursor = connection.cursor()
-    cursor.execute("SELECT * FROM public.\"MediaIds\" ORDER BY RANDOM() LIMIT 1")
-    random_record = cursor.fetchone()
-
-    connection.close()
-    return random_record
 
 
 @dp.message_handler(commands=['back'], state="*")
