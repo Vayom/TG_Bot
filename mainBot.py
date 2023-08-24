@@ -1,5 +1,6 @@
 import asyncio
 import requests
+
 from config import API_TOKEN, API_OWM_TOKEN
 import psycopg2
 import random
@@ -12,6 +13,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
 import logging
 
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram import Dispatcher, Bot, executor, types
 from aiogram import Bot, Dispatcher, types
 from aiogram.dispatcher import FSMContext
@@ -36,7 +38,7 @@ count = 0
 
 bot = Bot(token=API_TOKEN)
 
-dp = Dispatcher(bot)
+dp = Dispatcher(bot, storage=MemoryStorage())
 logging.basicConfig(level=logging.INFO)
 dp.middleware.setup(LoggingMiddleware())
 
@@ -47,6 +49,7 @@ Base.metadata.create_all(engine)
 
 
 class States(StatesGroup):
+    Weather = State()
     START = State()
     GIVING_ITEM = State()
     LOAD_ITEM = State()
@@ -55,15 +58,23 @@ class States(StatesGroup):
 def start_keyboard():
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
     button1 = KeyboardButton("/give")
-    button2 = KeyboardButton("/help")
-    keyboard.add(button1, button2)
+    button2 = KeyboardButton("/weather")
+    button3 = KeyboardButton("/help")
+    keyboard.add(button1, button2, button3)
+    return keyboard
+
+
+def weather_keyboard():
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    button1 = KeyboardButton("/back")
+    keyboard.add(button1)
     return keyboard
 
 
 def give_keyboard():
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-    button1 = KeyboardButton("/back")
-    button2 = KeyboardButton("/give")
+    button1 = KeyboardButton("/give")
+    button2 = KeyboardButton("/back")
     keyboard.add(button1, button2)
     return keyboard
 
@@ -85,32 +96,43 @@ def get_random_record_from_postgres():
     return random_record
 
 
+@dp.message_handler(commands=['back'], state="*")
+async def help_print(message: types.Message, state: FSMContext):
+    global count
+    count += 1
+    await message.answer('Возвращение в начальное состояние')
+    await message.answer('Выберите действие', reply_markup=start_keyboard())
+    await state.finish()
+
+
 @dp.message_handler(commands=['weather'])
 async def weather_state(message: types.Message):
-    await message.reply('Введите название городе, погоду которого хотите посмотреть')
-    await States.START.set()
+    await States.Weather.set()
+    await message.answer('Введите название городе, погоду которого хотите посмотреть', reply_markup=weather_keyboard())
 
 
-@dp.message_handler()
-async def weather_print(message: types.Message):
-    city_name = message.text
+@dp.message_handler(state=States.Weather)
+async def weather_print(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        data['city_name'] = message.text
+        # Отправляем запрос к OpenWeatherMap API
+        try:
+            response = requests.get(
+                f"http://api.openweathermap.org/data/2.5/weather?q={data['city_name']}&appid={API_OWM_TOKEN}")
+            weather_data = response.json()
+            if response.status_code == 200:
+                weather_description = weather_data["weather"][0]["description"]
+                temperature = weather_data["main"]["temp"] - 273.15  # Конвертируем из Кельвинов в градусы Цельсия
+                await message.reply(
+                    f"Погода в городе {data['city_name']}: {weather_description}, температура: {temperature:.2f}°C")
+            else:
+                await message.reply("Не удалось получить данные о погоде.")
+        except Exception as e:
+            await message.reply("Произошла ошибка при запросе погодных данных.")
 
-    # Отправляем запрос к OpenWeatherMap API
-    try:
-        response = requests.get(f"http://api.openweathermap.org/data/2.5/weather?q={city_name}&appid={API_OWM_TOKEN}")
-        weather_data = response.json()
-        if response.status_code == 200:
-            weather_description = weather_data["weather"][0]["description"]
-            temperature = weather_data["main"]["temp"] - 273.15  # Конвертируем из Кельвинов в градусы Цельсия
-            await message.reply(f"Погода в городе {city_name}: {weather_description}, температура: {temperature:.2f}°C")
-        else:
-            await message.reply("Не удалось получить данные о погоде.")
-    except Exception as e:
-        await message.reply("Произошла ошибка при запросе погодных данных.")
 
-
-@dp.message_handler(commands=['give'])
-async def give_random(message: types.Message):
+@dp.message_handler(commands=['give'], state='*')
+async def give_random(message: types.Message, state: FSMContext):
     global count
     count += 1
     random_material = get_random_record_from_postgres()
@@ -118,7 +140,6 @@ async def give_random(message: types.Message):
         await bot.send_sticker(chat_id=message.chat.id, sticker=random_material[2])
     elif random_material[1] == 'voice':
         await bot.send_voice(chat_id=message.chat.id, voice=random_material[2])
-    await States.GIVING_ITEM.set()
     await message.answer('Выберите действие', reply_markup=give_keyboard())
 
 
@@ -150,15 +171,6 @@ async def handle_all_messages(message: types.Message):
     session.commit()
     session.close()
     print('Работает')
-
-
-@dp.message_handler(commands='back')
-async def help_print(message: types.Message):
-    global count
-    count += 1
-    await message.answer('Возвращение в начальное состояние')
-    await message.answer('Выберите действие', reply_markup=start_keyboard())
-    await States.START.set()
 
 
 @dp.message_handler(commands=['help'])
